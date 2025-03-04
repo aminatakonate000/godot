@@ -12,6 +12,12 @@
 #define HAS_MALLOC_USABLE_SIZE 1
 #endif
 
+// Set to 1 to always check vector operator[], front(), and back() even in release.
+#define BASISU_VECTOR_FORCE_CHECKING 0
+
+// If 1, the vector container will not query the CRT to get the size of resized memory blocks.
+#define BASISU_VECTOR_DETERMINISTIC 1
+
 #ifdef _MSC_VER
 #define BASISU_FORCE_INLINE __forceinline
 #else
@@ -182,8 +188,9 @@ namespace basisu
 
 #define BASISU_IS_SCALAR_TYPE(T) (scalar_type<T>::cFlag)
 
-#if defined(__GNUC__) && __GNUC__<5
-   #define BASISU_IS_TRIVIALLY_COPYABLE(...) __has_trivial_copy(__VA_ARGS__)
+#if !defined(BASISU_HAVE_STD_TRIVIALLY_COPYABLE) && defined(__GNUC__) && __GNUC__<5
+   //#define BASISU_IS_TRIVIALLY_COPYABLE(...) __has_trivial_copy(__VA_ARGS__)
+    #define BASISU_IS_TRIVIALLY_COPYABLE(...) __is_trivially_copyable(__VA_ARGS__)
 #else
    #define BASISU_IS_TRIVIALLY_COPYABLE(...) std::is_trivially_copyable<__VA_ARGS__>::value
 #endif
@@ -279,7 +286,21 @@ namespace basisu
          m_size = other.m_size;
 
          if (BASISU_IS_BITWISE_COPYABLE(T))
-            memcpy(m_p, other.m_p, m_size * sizeof(T));
+         {
+#ifndef __EMSCRIPTEN__
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"            
+#endif                  
+#endif
+             if ((m_p) && (other.m_p))
+                memcpy(m_p, other.m_p, m_size * sizeof(T));
+#ifndef __EMSCRIPTEN__
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif                
+#endif
+         }
          else
          {
             T* pDst = m_p;
@@ -320,7 +341,21 @@ namespace basisu
          }
 
          if (BASISU_IS_BITWISE_COPYABLE(T))
-            memcpy(m_p, other.m_p, other.m_size * sizeof(T));
+         {
+#ifndef __EMSCRIPTEN__
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"            
+#endif         
+#endif
+             if ((m_p) && (other.m_p))
+                memcpy(m_p, other.m_p, other.m_size * sizeof(T));
+#ifndef __EMSCRIPTEN__          
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif                            
+#endif
+         }
          else
          {
             T* pDst = m_p;
@@ -348,20 +383,81 @@ namespace basisu
       // operator[] will assert on out of range indices, but in final builds there is (and will never be) any range checking on this method.
       //BASISU_FORCE_INLINE const T& operator[] (uint32_t i) const { assert(i < m_size); return m_p[i]; }
       //BASISU_FORCE_INLINE T& operator[] (uint32_t i) { assert(i < m_size); return m_p[i]; }
-
+            
+#if !BASISU_VECTOR_FORCE_CHECKING
       BASISU_FORCE_INLINE const T& operator[] (size_t i) const { assert(i < m_size); return m_p[i]; }
       BASISU_FORCE_INLINE T& operator[] (size_t i) { assert(i < m_size); return m_p[i]; }
+#else
+      BASISU_FORCE_INLINE const T& operator[] (size_t i) const 
+      { 
+          if (i >= m_size)
+          {
+              fprintf(stderr, "operator[] invalid index: %u, max entries %u, type size %u\n", (uint32_t)i, m_size, (uint32_t)sizeof(T));
+              abort();
+          }
+          return m_p[i]; 
+      }
+      BASISU_FORCE_INLINE T& operator[] (size_t i) 
+      { 
+          if (i >= m_size)
+          {
+              fprintf(stderr, "operator[] invalid index: %u, max entries %u, type size %u\n", (uint32_t)i, m_size, (uint32_t)sizeof(T));
+              abort();
+          }
+          return m_p[i]; 
+      }
+#endif
 
       // at() always includes range checking, even in final builds, unlike operator [].
       // The first element is returned if the index is out of range.
       BASISU_FORCE_INLINE const T& at(size_t i) const { assert(i < m_size); return (i >= m_size) ? m_p[0] : m_p[i]; }
       BASISU_FORCE_INLINE T& at(size_t i) { assert(i < m_size); return (i >= m_size) ? m_p[0] : m_p[i]; }
-
+            
+#if !BASISU_VECTOR_FORCE_CHECKING
       BASISU_FORCE_INLINE const T& front() const { assert(m_size); return m_p[0]; }
       BASISU_FORCE_INLINE T& front() { assert(m_size); return m_p[0]; }
 
       BASISU_FORCE_INLINE const T& back() const { assert(m_size); return m_p[m_size - 1]; }
       BASISU_FORCE_INLINE T& back() { assert(m_size); return m_p[m_size - 1]; }
+#else
+      BASISU_FORCE_INLINE const T& front() const 
+      { 
+          if (!m_size)
+          {
+              fprintf(stderr, "front: vector is empty, type size %u\n", (uint32_t)sizeof(T));
+              abort();
+          }
+          return m_p[0]; 
+      }
+      BASISU_FORCE_INLINE T& front() 
+      { 
+          if (!m_size)
+          {
+              fprintf(stderr, "front: vector is empty, type size %u\n", (uint32_t)sizeof(T));
+              abort();
+          }
+          return m_p[0]; 
+      }
+
+      BASISU_FORCE_INLINE const T& back() const 
+      { 
+          if(!m_size)
+          {
+              fprintf(stderr, "back: vector is empty, type size %u\n", (uint32_t)sizeof(T));
+              abort();
+          }
+          return m_p[m_size - 1]; 
+      }
+      BASISU_FORCE_INLINE T& back() 
+      { 
+          if (!m_size)
+          {
+              fprintf(stderr, "back: vector is empty, type size %u\n", (uint32_t)sizeof(T));
+              abort();
+          }
+          return m_p[m_size - 1]; 
+      }
+#endif
 
       BASISU_FORCE_INLINE const T* get_ptr() const { return m_p; }
       BASISU_FORCE_INLINE T* get_ptr() { return m_p; }
@@ -428,7 +524,7 @@ namespace basisu
 
          if (new_capacity > m_capacity)
          {
-            if (!increase_capacity(new_capacity, false))
+            if (!increase_capacity(new_capacity, false, true))
                return false;
          }
          else if (new_capacity < m_capacity)
@@ -436,7 +532,8 @@ namespace basisu
             // Must work around the lack of a "decrease_capacity()" method.
             // This case is rare enough in practice that it's probably not worth implementing an optimized in-place resize.
             vector tmp;
-            tmp.increase_capacity(helpers::maximum(m_size, new_capacity), false);
+            if (!tmp.increase_capacity(helpers::maximum(m_size, new_capacity), false, true))
+                return false;
             tmp = *this;
             swap(tmp);
          }
@@ -677,7 +774,21 @@ namespace basisu
             }
 
             // Copy "down" the objects to preserve, filling in the empty slots.
+
+#ifndef __EMSCRIPTEN__
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"            
+#endif
+#endif
+
             memmove(pDst, pSrc, num_to_move * sizeof(T));
+
+#ifndef __EMSCRIPTEN__
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif            
+#endif
          }
          else
          {
@@ -930,7 +1041,21 @@ namespace basisu
       inline void set_all(const T& o)
       {
          if ((sizeof(T) == 1) && (scalar_type<T>::cFlag))
+         {
+#ifndef __EMSCRIPTEN__
+#ifdef __GNUC__
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wclass-memaccess"            
+#endif              
+#endif
             memset(m_p, *reinterpret_cast<const uint8_t*>(&o), m_size);
+
+#ifndef __EMSCRIPTEN__            
+#ifdef __GNUC__
+#pragma GCC diagnostic pop
+#endif                        
+#endif
+         }
          else
          {
             T* pDst = m_p;
@@ -952,9 +1077,11 @@ namespace basisu
 
       // Caller is granting ownership of the indicated heap block.
       // Block must have size constructed elements, and have enough room for capacity elements.
+      // The block must have been allocated using malloc().
+      // Important: This method is used in Basis Universal. If you change how this container allocates memory, you'll need to change any users of this method.
       inline bool grant_ownership(T* p, uint32_t size, uint32_t capacity)
       {
-         // To to prevent the caller from obviously shooting themselves in the foot.
+         // To prevent the caller from obviously shooting themselves in the foot.
          if (((p + capacity) > m_p) && (p < (m_p + m_capacity)))
          {
             // Can grant ownership of a block inside the container itself!
